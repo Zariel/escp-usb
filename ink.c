@@ -24,6 +24,33 @@ typedef struct ink_level_s{
     int black;
 } ink_level_t;
 
+/* From D4lib */
+typedef struct cmdHeader_s {
+   unsigned char psid;
+   unsigned char ssid;
+   unsigned char lengthH;
+   unsigned char lengthL;
+   unsigned char credit;
+   unsigned char control;
+   unsigned char command;
+} cmdHeader_t;
+
+typedef struct replyHeader_s {
+   unsigned char psid;
+   unsigned char ssid;
+   unsigned char lengthH;
+   unsigned char lengthL;
+   unsigned char credit;
+   unsigned char control;
+   unsigned char command;
+   unsigned char result;
+} replyHeader_t;
+
+typedef struct init_s {
+   cmdHeader_t head;
+   unsigned char          revision;
+} init_t;
+
 enum errors {
     ERR_NO_DEVICES = 0x01,
     ERR_NO_PRINTER_FOUND = 0x02
@@ -37,19 +64,77 @@ enum errors {
  * Init IEEE1284.4 transaction
 */
 
+int usb_transfer(libusb_device_handle *dev, unsigned char ep, char *buf, int len, int *trans) {
+    int err = 0;
+    int _trans;
+    char _buf[len];
+
+    int read = (ep & LIBUSB_ENDPOINT_IN);
+
+    if(read) {
+        /* Give a small sleep */
+        usleep(2000);
+    } else {
+        if(memcpy(_buf, buf, len) == NULL) {
+            // errz
+            return 1;
+        }
+    }
+
+    err = libusb_bulk_transfer(dev, ep, _buf, len, &_trans, 0);
+
+    if(!err) {
+        if(read) {
+            memcpy(buf, _buf, len);
+        }
+        *trans = _trans;
+    }
+
+    return err;
+}
+
 int clear_buffer(printer_t *printer) {
     int err = 0;
     int trans;
 
     char buf[200];
-    err = libusb_bulk_transfer(printer->handle, printer->ep_read, buf, 200, &trans, 0);
+    //err = libusb_bulk_transfer(printer->handle, printer->ep_read, buf, 200, &trans, 0);
+    err = usb_transfer(printer->handle, printer->ep_read, buf, 200, &trans);
 
     return err;
 }
 
+int init_ieee(printer_t *printer) {
+    /* Send some datas, no idea what is going on here .. */
+    int err = 0;
+    int trans;
+    init_t cmd;
+
+    cmd.head.psid = 0;
+    cmd.head.ssid = 0;
+    cmd.head.lengthH = 0;
+    cmd.head.lengthL = 8;
+    cmd.head.credit = 1;
+    cmd.head.control = 0;
+    cmd.head.command = 0;
+    cmd.revision = 0x10;
+
+    char buf[9];
+    memset(buf, 0, sizeof(buf));
+
+    err = libusb_bulk_transfer(printer->handle, printer->ep_write, (unsigned char *) &cmd, sizeof(cmd), &trans, 10000);
+
+    usleep(10000);
+
+    err = libusb_bulk_transfer(printer->handle, printer->ep_read, buf, 9, &trans, 10000);
+    printf("%d %d\n", err, trans);
+
+    return 0;
+}
 
 int enter_ieee(printer_t *printer) {
     clear_buffer(printer);
+
     unsigned char cmd[] = {
         0x00, 0x00, 0x00, 0x1b, 0x01, '@', 'E', 'J', 'L', ' ',
         '1', '2', '8', '4', '.', '4', 0x0a, '@', 'E', 'J',
@@ -60,10 +145,24 @@ int enter_ieee(printer_t *printer) {
     int trans;
 
     printf("Entering IEEE mode .. \n");
-    err = libusb_bulk_transfer(printer->handle, printer->ep_write, cmd, sizeof(cmd), &trans, 1000);
-    //write_cmd(printer, cmd, sizeof(cmd), &trans);
+    //if(err = libusb_bulk_transfer(printer->handle, printer->ep_write, cmd, sizeof(cmd), &trans, 10000)) {
+    if(err = usb_transfer(printer->handle, printer->ep_write, cmd, sizeof(cmd), &trans)) {
+        printf("Unable to Write to printer");
+        return 1;
+    } else {
+        if(trans != sizeof(cmd)) {
+            printf("Didnt write all data .. \n");
+            return 1;
+        }
+    }
 
-    printf("(%d) %d\n", err, trans);
+    // Read response
+    char buf[8];
+    if(err = libusb_bulk_transfer(printer->handle, printer->ep_read, buf, 8, &trans, 10000)) {
+        printf("ERR reading\n");
+    }
+
+    printf("%d %d\n", err, trans);
 
     return 0;
 }
@@ -211,6 +310,9 @@ int main(int argc, char **argv) {
         if(err = libusb_set_interface_alt_setting(dev, printer->iface, printer->altset)) {
             printf("ERR set_alt: %d\n", err);
         }
+
+        err = libusb_clear_halt(dev, printer->ep_write);
+        err = libusb_clear_halt(dev, printer->ep_read);
 
         printf("Found Printer @ %d:%d\n", printer->bus, printer->addr);
         printf("bInterfaceNumber: %d\n", printer->iface);
