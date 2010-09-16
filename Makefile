@@ -1,10 +1,10 @@
 CC=gcc
 CFLAGS=-Wall -I/usr/include/libusb-1.0 -lusb-1.0
 
-all: ink
+all: escp-usb
 
-ink: ink.o
-	$(CC) $(CFLAGS) ink.o -o ink
+escp-usb: escp-usb.o
+	$(CC) $(CFLAGS) $< -o $@
 
-ink.o: ink.c
-	$(CC) -Wall -c ink.c
+escp-usb.o: escp-usb.c
+	$(CC) -Wall -c $<
