@@ -24,32 +24,6 @@ typedef struct ink_level_s{
     int black;
 } ink_level_t;
 
-/* From D4lib */
-typedef struct cmdHeader_s {
-   unsigned char psid;
-   unsigned char ssid;
-   unsigned char lengthH;
-   unsigned char lengthL;
-   unsigned char credit;
-   unsigned char control;
-   unsigned char command;
-} cmdHeader_t;
-
-typedef struct replyHeader_s {
-   unsigned char psid;
-   unsigned char ssid;
-   unsigned char lengthH;
-   unsigned char lengthL;
-   unsigned char credit;
-   unsigned char control;
-   unsigned char command;
-   unsigned char result;
-} replyHeader_t;
-
-typedef struct init_s {
-   cmdHeader_t head;
-   unsigned char          revision;
-} init_t;
 
 enum errors {
     ERR_NO_DEVICES = 0x01,
@@ -74,6 +48,7 @@ int usb_transfer(libusb_device_handle *dev, unsigned char ep, char *buf, int len
     if(read) {
         /* Give a small sleep */
         usleep(2000);
+        memset(_buf, '0', len);
     } else {
         if(memcpy(_buf, buf, len) == NULL) {
             // errz
@@ -104,34 +79,6 @@ int clear_buffer(printer_t *printer) {
     return err;
 }
 
-int init_ieee(printer_t *printer) {
-    /* Send some datas, no idea what is going on here .. */
-    int err = 0;
-    int trans;
-    init_t cmd;
-
-    cmd.head.psid = 0;
-    cmd.head.ssid = 0;
-    cmd.head.lengthH = 0;
-    cmd.head.lengthL = 8;
-    cmd.head.credit = 1;
-    cmd.head.control = 0;
-    cmd.head.command = 0;
-    cmd.revision = 0x10;
-
-    char buf[9];
-    memset(buf, 0, sizeof(buf));
-
-    err = libusb_bulk_transfer(printer->handle, printer->ep_write, (unsigned char *) &cmd, sizeof(cmd), &trans, 10000);
-
-    usleep(10000);
-
-    err = libusb_bulk_transfer(printer->handle, printer->ep_read, buf, 9, &trans, 10000);
-    printf("%d %d\n", err, trans);
-
-    return 0;
-}
-
 int enter_ieee(printer_t *printer) {
     clear_buffer(printer);
 
@@ -158,9 +105,13 @@ int enter_ieee(printer_t *printer) {
 
     // Read response
     char buf[8];
-    if(err = libusb_bulk_transfer(printer->handle, printer->ep_read, buf, 8, &trans, 10000)) {
+    memset(buf, '0', 8);
+    //if(err = libusb_bulk_transfer(printer->handle, printer->ep_read, buf, 8, &trans, 10000)) {
+    if(err = usb_transfer(printer->handle, printer->ep_read, buf, 8, &trans)) {
         printf("ERR reading\n");
     }
+
+    printf("%s\n", buf);
 
     printf("%d %d\n", err, trans);
 
@@ -265,12 +216,15 @@ int get_ink_level(printer_t *printer, ink_level_t **ink) {
     int trans = 0;
     int err = 0;
 
-    err = init_printer(printer);
-
     printf("Sending status .. \n");
+    err = usb_transfer(printer->handle, printer->ep_write, data, 5, &trans);
+    printf("%d: %d\n", err, trans);
 
-    err = libusb_bulk_transfer(printer->handle, printer->ep_write, data, 5, &trans, 5000);
-    printf("%d\n", err);
+    printf("Reading .. \n");
+    char buf[128];
+    err = usb_transfer(printer->handle, printer->ep_read, buf, 128, &trans);
+    printf("%d: %d\n", err, trans);
+    printf("%s\n", buf);
 
     return 0;
 }
@@ -323,9 +277,12 @@ int main(int argc, char **argv) {
         printf("Max Write Size: %d\n", libusb_get_max_packet_size(printer->device, printer->ep_write));
         printf("Max Read Size: %d\n", libusb_get_max_packet_size(printer->device, printer->ep_read));
 
-        ink_level_t *ink = NULL;
-        //get_ink_level(printer, &ink);
         init_printer(printer);
+
+        /*
+        ink_level_t *ink = NULL;
+        get_ink_level(printer, &ink);
+        */
 
         err = libusb_release_interface(dev, printer->iface);
         libusb_close(dev);
