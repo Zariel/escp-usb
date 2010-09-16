@@ -1,0 +1,15 @@
+My current understanding of how the escp/d4lib communicate with the printer.
+
+Initialy the command to enter ieee 1284.4 mode is sent, which is this:
+
+    unsigned char cmd[] = {
+        0x00, 0x00, 0x00, 0x1b, 0x01, '@', 'E', 'J', 'L', ' ',
+        '1', '2', '8', '4', '.', '4', 0x0a, '@', 'E', 'J',
+        'L', 0x0a, '@', 'E', 'J', 'L', 0x0a
+    };
+
+The printer should return acknowledgment of this. Then ieee 1284.4 mode is
+initialised, d4lib.c has the Init() function which sends a struct with some
+variables filled to the printer over the bulk transfer.
+
+To retrieve the ink level the status command is then sent.
